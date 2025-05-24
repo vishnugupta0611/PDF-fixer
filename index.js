@@ -8,6 +8,7 @@ const { createWorker } = require('tesseract.js');
 const path = require('path');
 const poppler = require('pdf-poppler');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const PDFDocument = require('pdfkit');
 
 // Load env variables (for API key)
 require('dotenv').config();
@@ -25,7 +26,39 @@ app.use(
   })
 );
 
-// Google Gemini initialization
+// pdf generation function here:
+const generateQuestionPDF = (questions, outputPath) => {
+  const outputDir = path.dirname(outputPath);
+
+  // Ensure output directory exists
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  const doc = new PDFDocument({ margin: 50 });
+  const stream = fs.createWriteStream(outputPath);
+  doc.pipe(stream);
+
+  doc.fontSize(20).fillColor('#333').text('Question Paper', { align: 'center' });
+  doc.moveDown();
+
+  questions.forEach((qObj, index) => {
+    const questionKey = Object.keys(qObj).find(k => k.startsWith('q'));
+    const questionText = qObj[questionKey];
+
+    doc.fontSize(14).fillColor('black').text(`${index + 1}. ${questionText}`);
+
+    ['A.', 'B.', 'C.', 'D.'].forEach((optionKey) => {
+      const isCorrect = qObj.correct.startsWith(optionKey);
+      doc.fillColor(isCorrect ? 'green' : 'black');
+      doc.text(`${optionKey} ${qObj[optionKey]}`);
+    });
+
+    doc.moveDown();
+  });
+
+  doc.end();
+};
 
 
 // OCR Function
@@ -161,12 +194,17 @@ app.post('/process-pdf', async (req, res) => {
     }
 
     const correctmcqs = await getcorrectmcqs(text);
+    const timestamp = Date.now(); // ✅ correct
 
-    res.json({
-      text: correctmcqs,
-      isOCR,
-      filename: pdfFile.name,
-    });
+    const outputPath = path.join(__dirname, `../output/${pdfFile.name}_${timestamp}.pdf`);
+    generateQuestionPDF(questions, outputPath);
+    res.download(outputPath, `${pdfFile.name}_${timestamp}.pdf`);
+    
+    // res.json({
+    //   text: correctmcqs,
+    //   isOCR,
+    //   filename: pdfFile.name,
+    // });
   } catch (error) {
     console.error('Error:', error);
     res.status(500).json({
