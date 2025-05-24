@@ -1,5 +1,5 @@
+// Required packages
 const express = require('express');
-const app = express();
 const cors = require('cors');
 const fileupload = require('express-fileupload');
 const fs = require('fs');
@@ -7,8 +7,15 @@ const pdfParse = require('pdf-parse');
 const { createWorker } = require('tesseract.js');
 const path = require('path');
 const poppler = require('pdf-poppler');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// Middleware setup
+// Load env variables (for API key)
+require('dotenv').config();
+
+// Initialize Express
+const app = express();
+
+// Middleware
 app.use(cors());
 app.use(express.json());
 app.use(
@@ -18,7 +25,10 @@ app.use(
   })
 );
 
-// OCR for all pages
+// Google Gemini initialization
+
+
+// OCR Function
 async function extractTextWithOCR(pdfPath) {
   const worker = await createWorker();
   const outputDir = path.join(__dirname, 'temp');
@@ -32,7 +42,6 @@ async function extractTextWithOCR(pdfPath) {
 
     fs.mkdirSync(outputDir, { recursive: true });
 
-    // Convert ALL pages of the PDF to PNG images
     await poppler.convert(pdfPath, {
       format: 'png',
       out_dir: outputDir,
@@ -45,14 +54,12 @@ async function extractTextWithOCR(pdfPath) {
 
     generatedFiles = pngFiles;
 
-    // Sort by page number
     pngFiles.sort((a, b) => {
       const aPage = parseInt(a.split('-')[1]);
       const bPage = parseInt(b.split('-')[1]);
       return aPage - bPage;
     });
 
-    // OCR for each page
     for (const file of pngFiles) {
       const imagePath = path.join(outputDir, file);
       const { data } = await worker.recognize(imagePath);
@@ -64,13 +71,72 @@ async function extractTextWithOCR(pdfPath) {
       isOCR: true,
       generatedFiles,
     };
-
   } finally {
     await worker.terminate();
   }
 }
 
-// PDF Processing Endpoint
+// Gemini Prompt Processor
+async function getcorrectmcqs(inputText) {
+
+
+
+
+const prompt = `
+You are a JSON MCQ fixer for a PDF parser. 
+
+Your task is to take raw multiple-choice questions (MCQs) and convert them **only** into the following JSON format:
+
+{
+  "questions": [
+    {
+      "q1.": "Question text",
+      "A.": "Option A",
+      "B.": "Option B",
+      "C.": "Option C",
+      "D.": "Option D",
+      "correct": "C. Correct Answer"
+    },
+    {
+      "q2.": "Second question...",
+      ...
+    }
+  ]
+}
+
+🛑 Important Rules:
+- Only include MCQs.
+- Each question must have 4 options: A, B, C, D.
+- Include the correct option as "correct": "X. Answer" where X is A, B, C, or D.
+- Do not include any explanations, notes, headings, or non-MCQ content.
+- Question keys must be "q1.", "q2.", etc. in order.
+- Use exact spacing and punctuation like shown above.
+
+Now convert the following MCQs to JSON:
+
+"""
+${inputText}
+"""
+`;
+
+
+
+
+
+  const genAI = new GoogleGenerativeAI("AIzaSyBOA6nnVD3nzsv_KeEnyGvFvjmrdvZ_Bns");
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+
+
+  const result = await model.generateContent(prompt);
+  console.log(result.response.text());
+  const text = result.response.text();
+
+  return text;
+  
+}
+
+// POST Endpoint
 app.post('/process-pdf', async (req, res) => {
   let generatedFiles = [];
   try {
@@ -81,12 +147,12 @@ app.post('/process-pdf', async (req, res) => {
     const pdfFile = req.files.pdf;
     const tempPath = pdfFile.tempFilePath;
 
-    // Try normal extraction
+    // Try text extraction
     const pdfData = await pdfParse(fs.readFileSync(tempPath));
     let text = pdfData.text;
     let isOCR = false;
 
-    // Fallback to OCR if extracted text is too little
+    // Fallback to OCR if not enough text
     if (!text || text.replace(/\s+/g, '').length < 15) {
       const ocrResult = await extractTextWithOCR(tempPath);
       text = ocrResult.text;
@@ -94,26 +160,26 @@ app.post('/process-pdf', async (req, res) => {
       generatedFiles = ocrResult.generatedFiles;
     }
 
+    const correctmcqs = await getcorrectmcqs(text);
+
     res.json({
-      text: text.trim(),
+      text: correctmcqs,
       isOCR,
       filename: pdfFile.name,
     });
-
   } catch (error) {
     console.error('Error:', error);
     res.status(500).json({
       error: 'Processing failed',
-      details: error.message
+      details: error.message,
     });
-
   } finally {
-    // Delete uploaded temp file
+    // Delete uploaded file
     if (req.files?.pdf?.tempFilePath && fs.existsSync(req.files.pdf.tempFilePath)) {
       fs.unlinkSync(req.files.pdf.tempFilePath);
     }
 
-    // Delete generated PNGs
+    // Delete generated images
     const tempDir = path.join(__dirname, 'temp');
     generatedFiles.forEach(file => {
       const filePath = path.join(tempDir, file);
@@ -122,6 +188,7 @@ app.post('/process-pdf', async (req, res) => {
   }
 });
 
+// Start server
 app.listen(3000, () => {
   console.log('Server running on port 3000');
 });
