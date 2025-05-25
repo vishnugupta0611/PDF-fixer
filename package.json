@@ -19,7 +19,6 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "express-fileupload": "^1.5.1",
-    "fileupload": "^1.0.0",
     "json5": "^2.2.3",
     "multer": "^2.0.0",
     "nodemon": "^3.1.10",
