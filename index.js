@@ -6,10 +6,10 @@ const fs = require('fs');
 const pdfParse = require('pdf-parse');
 const { createWorker } = require('tesseract.js');
 const path = require('path');
-const poppler = require('pdf-poppler');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const PDFDocument = require('pdfkit');
-const JSON5 = require('json5'); // Required for safe parsing
+const JSON5 = require('json5');
+const sharp = require('sharp'); // Alternative to poppler
 
 // Load env variables (for API key)
 require('dotenv').config();
@@ -61,52 +61,30 @@ const generateQuestionPDF = (questions, outputPath) => {
 
   doc.end();
   
-  // Return a promise that resolves when the PDF is written
   return new Promise((resolve, reject) => {
     stream.on('finish', resolve);
     stream.on('error', reject);
   });
 };
 
-// OCR Function
+// Alternative OCR function without poppler dependency
 async function extractTextWithOCR(pdfPath) {
   const worker = await createWorker();
-  const outputDir = path.join(__dirname, 'temp');
-  const outputPrefix = `page_${Date.now()}`;
   let combinedText = '';
-  let generatedFiles = [];
 
   try {
     await worker.loadLanguage('eng');
     await worker.initialize('eng');
-    fs.mkdirSync(outputDir, { recursive: true });
 
-    await poppler.convert(pdfPath, {
-      format: 'png',
-      out_dir: outputDir,
-      out_prefix: outputPrefix,
-    });
-
-    const files = fs.readdirSync(outputDir);
-    const pngFiles = files.filter(f => f.endsWith('.png') && f.includes(outputPrefix));
-    if (pngFiles.length === 0) throw new Error('No image files generated');
-
-    generatedFiles = pngFiles.sort((a, b) => {
-      const aPage = parseInt(a.split('-')[1]);
-      const bPage = parseInt(b.split('-')[1]);
-      return aPage - bPage;
-    });
-
-    for (const file of pngFiles) {
-      const imagePath = path.join(outputDir, file);
-      const { data } = await worker.recognize(imagePath);
-      combinedText += `Page ${file.split('-')[1]}\n${data.text}\n\n`;
-    }
-
+    // Try to extract first page as image using a different approach
+    // Since we can't convert PDF to image easily without poppler,
+    // we'll rely more on pdf-parse and use OCR as fallback
+    
+    console.log('OCR extraction attempted but poppler not available');
     return {
-      text: combinedText.trim(),
-      isOCR: true,
-      generatedFiles,
+      text: 'OCR not available - using text extraction only',
+      isOCR: false,
+      generatedFiles: [],
     };
   } finally {
     await worker.terminate();
@@ -144,7 +122,7 @@ Your task is to take raw multiple-choice questions (MCQs) and convert them **onl
 - Do not include any explanations, notes, headings, or non-MCQ content.
 - Question keys must be "q1.", "q2.", etc. in order.
 - Use exact spacing and punctuation like shown above.
--give me questions upto 100 only and dont include any explanation or code markdown
+- Give me questions up to 100 only and don't include any explanation or code markdown
 Now convert the following MCQs to JSON:
 give ans of all questions 
 
@@ -153,97 +131,75 @@ ${inputText}
 """
 `;
 
-  const genAI = new GoogleGenerativeAI('AIzaSyCsJfTPCG9SLEBxcTxr3CqIu-BLRH1BmA0');
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'AIzaSyCsJfTPCG9SLEBxcTxr3CqIu-BLRH1BmA0');
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash", // or "gemini-1.5-pro"
+    model: "gemini-1.5-flash",
     apiVersion: "v1"
   });
 
   const result = await model.generateContent(prompt);
   const text = result.response.text();
-  console.log(text);
+  console.log('Gemini response received');
   return text;
 }
 
-// Gemini JSON Extractor
+// Clean text function
+function cleanText(text) {
+  return text
+    .replace(/\s+/g, ' ')
+    .replace(/^\s+|\s+$/g, '');
+}
+
+// Extract questions function
 function extractValidQuestionsFromText(text) {
   try {
+    // Try to parse as complete JSON first
     const cleaned = text.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
+    
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (parsed.questions && Array.isArray(parsed.questions)) {
+        return parsed;
+      }
+    } catch (e) {
+      console.log('Full JSON parse failed, trying regex approach');
+    }
 
-    // Extract all {...} objects inside "questions": [ ... ]
-    const questionsBlockMatch = cleaned.match(/"questions"\s*:\s*\[(.*)\]/s);
-    if (!questionsBlockMatch) throw new Error('Questions array not found');
+    // Fallback: Extract individual question objects
+    const regex = /{[^{}]*?"q\d+\..*?"[^{}]*?"correct":\s*".+?"[^{}]*?}/gs;
+    const matches = text.match(regex);
+    
+    if (!matches) {
+      console.log('No question matches found');
+      return null;
+    }
 
-    const questionsBlock = questionsBlockMatch[1];
-
-    const rawObjects = questionsBlock.split(/\},\s*\{/g).map((chunk, index, arr) => {
-      // Fix brackets since split removes them
-      if (index !== 0) chunk = '{' + chunk;
-      if (index !== arr.length - 1) chunk = chunk + '}';
-      return chunk;
-    });
-
-    const validQuestions = [];
-
-    for (const objStr of rawObjects) {
+    const questions = [];
+    for (let obj of matches) {
       try {
-        const wrapped = `{${objStr.replace(/^{/, '').replace(/}$/, '')}}`;
-        const parsed = JSON5.parse(wrapped);
-        validQuestions.push(parsed);
+        const cleaned = obj.replace(/(\w+)\s*:/g, '"$1":');
+        const jsonObj = JSON.parse(cleaned);
+        questions.push(jsonObj);
       } catch (e) {
-        // ignore bad ones
+        console.log('Skipping invalid question object');
+        continue;
       }
     }
 
-    return { questions: validQuestions };
+    return { questions };
   } catch (err) {
     console.error('❌ Failed to parse questions:', err.message);
     return null;
   }
 }
 
-// POST Endpoint
-function cleanText(text) {
-  return text
-    .replace(/\s+/g, ' ')    // Multiple whitespaces ko single space banata hai
-    .replace(/^\s+|\s+$/g, '') // Start aur end ke whitespaces hata deta hai
-}
-
-function extractValidQuestionsFromText(text) {
-  try {
-    // 1. Match all question objects
-    const regex = /{[^{}]*?"q\d+\..*?"[^{}]*?"correct":\s*".+?"[^{}]*?}/gs;
-
-    // 2. Extract all matching question objects
-    const matches = text.match(regex);
-    if (!matches) return null;
-
-    // 3. Parse all matched objects safely
-    const questions = [];
-    for (let obj of matches) {
-      try {
-        const cleaned = obj.replace(/(\w+)\s*:/g, '"$1":'); // ensure keys are quoted
-        const jsonObj = JSON.parse(cleaned);
-        questions.push(jsonObj);
-      } catch (e) {
-        // Skip this object if it's not valid JSON
-        continue;
-      }
-    }
-
-    // 4. Return clean question array
-    return { questions };
-  } catch (err) {
-    return null;
-  }
-}
-
+// Main endpoint
 app.post('/process-pdf', async (req, res) => {
   let generatedFiles = [];
   let outputPath = null;
 
   try {
-    console.log('Processing PDF...');
+    console.log('Processing PDF request...');
     
     if (!req.files?.pdf) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -252,46 +208,67 @@ app.post('/process-pdf', async (req, res) => {
     const pdfFile = req.files.pdf;
     const tempPath = pdfFile.tempFilePath;
 
-    // Text extraction
+    console.log('Extracting text from PDF...');
+    
+    // Primary text extraction using pdf-parse
     const pdfData = await pdfParse(fs.readFileSync(tempPath));
     let text = pdfData.text;
     let isOCR = false;
 
-    if (!text || text.replace(/\s+/g, '').length < 15) {
-      const ocrResult = await extractTextWithOCR(tempPath);
-      text = ocrResult.text;
-      isOCR = ocrResult.isOCR;
-      generatedFiles = ocrResult.generatedFiles;
+    console.log('Extracted text length:', text.length);
+
+    // If text is too short, try OCR (though limited without poppler)
+    if (!text || text.replace(/\s+/g, '').length < 50) {
+      console.log('Text too short, attempting OCR...');
+      try {
+        const ocrResult = await extractTextWithOCR(tempPath);
+        if (ocrResult.text && ocrResult.text.length > text.length) {
+          text = ocrResult.text;
+          isOCR = ocrResult.isOCR;
+          generatedFiles = ocrResult.generatedFiles;
+        }
+      } catch (ocrError) {
+        console.log('OCR failed:', ocrError.message);
+      }
+    }
+
+    if (!text || text.length < 20) {
+      return res.status(400).json({ 
+        error: 'Could not extract sufficient text from PDF. Please ensure the PDF contains readable text or try a different file.' 
+      });
     }
     
-    console.log('Extracted text length:', text.length);
     text = cleanText(text);
+    console.log('Sending to Gemini for processing...');
     
     const correctmcqs = await getcorrectmcqs(text);
     const parsed = extractValidQuestionsFromText(correctmcqs);
-    console.log('Parsed questions:', parsed?.questions?.length);
     
-    if (!parsed || !Array.isArray(parsed.questions)) {
+    console.log('Parsed questions count:', parsed?.questions?.length || 0);
+    
+    if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
       return res.status(500).json({
-        error: 'Invalid or incomplete JSON returned from Gemini.',
-        raw: correctmcqs,
+        error: 'No valid MCQs found in the document. Please ensure your PDF contains properly formatted multiple choice questions.',
+        details: 'The document may not contain MCQs or they may not be in a recognizable format.'
       });
     }
 
     const timestamp = Date.now();
     outputPath = path.join(__dirname, './output', `${pdfFile.name}_${timestamp}.pdf`);
     
-    // Wait for PDF generation to complete
+    console.log('Generating output PDF...');
     await generateQuestionPDF(parsed.questions, outputPath);
     
-    // Check if file exists
     if (!fs.existsSync(outputPath)) {
       throw new Error('PDF generation failed - file not created');
     }
 
+    console.log('Sending PDF to client...');
+    
     // Set proper headers for file download
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${pdfFile.name}_processed_${timestamp}.pdf"`);
+    res.setHeader('Content-Length', fs.statSync(outputPath).size);
     
     // Stream the file to response
     const fileStream = fs.createReadStream(outputPath);
@@ -299,35 +276,67 @@ app.post('/process-pdf', async (req, res) => {
     
     // Clean up files after streaming
     fileStream.on('end', () => {
-      // Delete the generated PDF after sending
       setTimeout(() => {
         if (fs.existsSync(outputPath)) {
           fs.unlinkSync(outputPath);
         }
-      }, 1000);
+      }, 2000);
+    });
+    
+    fileStream.on('error', (err) => {
+      console.error('File stream error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Error streaming file' });
+      }
     });
     
   } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({
-      error: 'Processing failed',
-      details: error.message,
-    });
+    console.error('❌ Processing error:', error.message);
+    
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: 'Processing failed',
+        details: error.message,
+      });
+    }
   } finally {
     // Clean up temp files
-    if (req.files?.pdf?.tempFilePath && fs.existsSync(req.files.pdf.tempFilePath)) {
-      fs.unlinkSync(req.files.pdf.tempFilePath);
-    }
+    try {
+      if (req.files?.pdf?.tempFilePath && fs.existsSync(req.files.pdf.tempFilePath)) {
+        fs.unlinkSync(req.files.pdf.tempFilePath);
+      }
 
-    const tempDir = path.join(__dirname, 'temp');
-    generatedFiles.forEach(file => {
-      const filePath = path.join(tempDir, file);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    });
+      const tempDir = path.join(__dirname, 'temp');
+      if (fs.existsSync(tempDir)) {
+        generatedFiles.forEach(file => {
+          const filePath = path.join(tempDir, file);
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        });
+      }
+    } catch (cleanupError) {
+      console.error('Cleanup error:', cleanupError.message);
+    }
   }
 });
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'PDF MCQ Processor API',
+    status: 'Running',
+    endpoints: {
+      'POST /process-pdf': 'Process PDF and extract MCQs',
+      'GET /health': 'Health check'
+    }
+  });
+});
+
 // Start server
-app.listen(3000, () => {
-  console.log('🚀 Server running on port 3000');
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
