@@ -60,6 +60,12 @@ const generateQuestionPDF = (questions, outputPath) => {
   });
 
   doc.end();
+  
+  // Return a promise that resolves when the PDF is written
+  return new Promise((resolve, reject) => {
+    stream.on('finish', resolve);
+    stream.on('error', reject);
+  });
 };
 
 // OCR Function
@@ -106,8 +112,6 @@ async function extractTextWithOCR(pdfPath) {
     await worker.terminate();
   }
 }
-
-
 
 // Gemini Prompt Processor
 async function getcorrectmcqs(inputText) {
@@ -198,14 +202,12 @@ function extractValidQuestionsFromText(text) {
   }
 }
 
-
 // POST Endpoint
 function cleanText(text) {
   return text
     .replace(/\s+/g, ' ')    // Multiple whitespaces ko single space banata hai
     .replace(/^\s+|\s+$/g, '') // Start aur end ke whitespaces hata deta hai
 }
-
 
 function extractValidQuestionsFromText(text) {
   try {
@@ -236,15 +238,13 @@ function extractValidQuestionsFromText(text) {
   }
 }
 
-
-
-
-
-
 app.post('/process-pdf', async (req, res) => {
   let generatedFiles = [];
+  let outputPath = null;
 
   try {
+    console.log('Processing PDF...');
+    
     if (!req.files?.pdf) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
@@ -263,11 +263,14 @@ app.post('/process-pdf', async (req, res) => {
       isOCR = ocrResult.isOCR;
       generatedFiles = ocrResult.generatedFiles;
     }
-    console.log(text)
+    
+    console.log('Extracted text length:', text.length);
     text = cleanText(text);
+    
     const correctmcqs = await getcorrectmcqs(text);
     const parsed = extractValidQuestionsFromText(correctmcqs);
-    console.log(parsed)
+    console.log('Parsed questions:', parsed?.questions?.length);
+    
     if (!parsed || !Array.isArray(parsed.questions)) {
       return res.status(500).json({
         error: 'Invalid or incomplete JSON returned from Gemini.',
@@ -276,9 +279,34 @@ app.post('/process-pdf', async (req, res) => {
     }
 
     const timestamp = Date.now();
-    const outputPath = path.join(__dirname, './output', `${pdfFile.name}_${timestamp}.pdf`);
-    generateQuestionPDF(parsed.questions, outputPath);
-    res.download(outputPath, `${pdfFile.name}_${timestamp}.pdf`);
+    outputPath = path.join(__dirname, './output', `${pdfFile.name}_${timestamp}.pdf`);
+    
+    // Wait for PDF generation to complete
+    await generateQuestionPDF(parsed.questions, outputPath);
+    
+    // Check if file exists
+    if (!fs.existsSync(outputPath)) {
+      throw new Error('PDF generation failed - file not created');
+    }
+
+    // Set proper headers for file download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${pdfFile.name}_processed_${timestamp}.pdf"`);
+    
+    // Stream the file to response
+    const fileStream = fs.createReadStream(outputPath);
+    fileStream.pipe(res);
+    
+    // Clean up files after streaming
+    fileStream.on('end', () => {
+      // Delete the generated PDF after sending
+      setTimeout(() => {
+        if (fs.existsSync(outputPath)) {
+          fs.unlinkSync(outputPath);
+        }
+      }, 1000);
+    });
+    
   } catch (error) {
     console.error('Error:', error);
     res.status(500).json({
@@ -286,6 +314,7 @@ app.post('/process-pdf', async (req, res) => {
       details: error.message,
     });
   } finally {
+    // Clean up temp files
     if (req.files?.pdf?.tempFilePath && fs.existsSync(req.files.pdf.tempFilePath)) {
       fs.unlinkSync(req.files.pdf.tempFilePath);
     }
