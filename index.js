@@ -9,6 +9,7 @@ const path = require('path');
 const poppler = require('pdf-poppler');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const PDFDocument = require('pdfkit');
+const JSON5 = require('json5'); // Required for safe parsing
 
 // Load env variables (for API key)
 require('dotenv').config();
@@ -26,11 +27,13 @@ app.use(
   })
 );
 
-// pdf generation function here:
+// PDF generation
 const generateQuestionPDF = (questions, outputPath) => {
-  const outputDir = path.dirname(outputPath);
+  if (!Array.isArray(questions)) {
+    throw new Error('generateQuestionPDF: questions is not a valid array');
+  }
 
-  // Ensure output directory exists
+  const outputDir = path.dirname(outputPath);
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
@@ -47,9 +50,8 @@ const generateQuestionPDF = (questions, outputPath) => {
     const questionText = qObj[questionKey];
 
     doc.fontSize(14).fillColor('black').text(`${index + 1}. ${questionText}`);
-
     ['A.', 'B.', 'C.', 'D.'].forEach((optionKey) => {
-      const isCorrect = qObj.correct.startsWith(optionKey);
+      const isCorrect = qObj.correct?.startsWith(optionKey);
       doc.fillColor(isCorrect ? 'green' : 'black');
       doc.text(`${optionKey} ${qObj[optionKey]}`);
     });
@@ -59,7 +61,6 @@ const generateQuestionPDF = (questions, outputPath) => {
 
   doc.end();
 };
-
 
 // OCR Function
 async function extractTextWithOCR(pdfPath) {
@@ -72,7 +73,6 @@ async function extractTextWithOCR(pdfPath) {
   try {
     await worker.loadLanguage('eng');
     await worker.initialize('eng');
-
     fs.mkdirSync(outputDir, { recursive: true });
 
     await poppler.convert(pdfPath, {
@@ -85,9 +85,7 @@ async function extractTextWithOCR(pdfPath) {
     const pngFiles = files.filter(f => f.endsWith('.png') && f.includes(outputPrefix));
     if (pngFiles.length === 0) throw new Error('No image files generated');
 
-    generatedFiles = pngFiles;
-
-    pngFiles.sort((a, b) => {
+    generatedFiles = pngFiles.sort((a, b) => {
       const aPage = parseInt(a.split('-')[1]);
       const bPage = parseInt(b.split('-')[1]);
       return aPage - bPage;
@@ -111,11 +109,7 @@ async function extractTextWithOCR(pdfPath) {
 
 // Gemini Prompt Processor
 async function getcorrectmcqs(inputText) {
-
-
-
-
-const prompt = `
+  const prompt = `
 You are a JSON MCQ fixer for a PDF parser. 
 
 Your task is to take raw multiple-choice questions (MCQs) and convert them **only** into the following JSON format:
@@ -144,7 +138,7 @@ Your task is to take raw multiple-choice questions (MCQs) and convert them **onl
 - Do not include any explanations, notes, headings, or non-MCQ content.
 - Question keys must be "q1.", "q2.", etc. in order.
 - Use exact spacing and punctuation like shown above.
-
+-respond with upto 90 questions only
 Now convert the following MCQs to JSON:
 
 """
@@ -152,26 +146,37 @@ ${inputText}
 """
 `;
 
-
-
-
-
-  const genAI = new GoogleGenerativeAI("AIzaSyBOA6nnVD3nzsv_KeEnyGvFvjmrdvZ_Bns");
+  const genAI = new GoogleGenerativeAI('AIzaSyBOA6nnVD3nzsv_KeEnyGvFvjmrdvZ_Bns');
   const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-
-
   const result = await model.generateContent(prompt);
-  console.log(result.response.text());
   const text = result.response.text();
-
+  console.log(text);
   return text;
-  
+}
+
+// Gemini JSON Extractor
+function extractJsonFromGeminiResponse(text) {
+  try {
+    const cleaned = text.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start) {
+      throw new Error('No valid JSON block found');
+    }
+
+    const jsonText = cleaned.substring(start, end + 1);
+    return JSON5.parse(jsonText);
+  } catch (err) {
+    console.error('❌ Failed to extract valid JSON:', err.message);
+    return null;
+  }
 }
 
 // POST Endpoint
 app.post('/process-pdf', async (req, res) => {
   let generatedFiles = [];
+
   try {
     if (!req.files?.pdf) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -180,12 +185,11 @@ app.post('/process-pdf', async (req, res) => {
     const pdfFile = req.files.pdf;
     const tempPath = pdfFile.tempFilePath;
 
-    // Try text extraction
+    // Text extraction
     const pdfData = await pdfParse(fs.readFileSync(tempPath));
     let text = pdfData.text;
     let isOCR = false;
 
-    // Fallback to OCR if not enough text
     if (!text || text.replace(/\s+/g, '').length < 15) {
       const ocrResult = await extractTextWithOCR(tempPath);
       text = ocrResult.text;
@@ -194,17 +198,19 @@ app.post('/process-pdf', async (req, res) => {
     }
 
     const correctmcqs = await getcorrectmcqs(text);
-    const timestamp = Date.now(); // ✅ correct
+    const parsed = extractJsonFromGeminiResponse(correctmcqs);
 
-    const outputPath = path.join(__dirname, `../output/${pdfFile.name}_${timestamp}.pdf`);
-    generateQuestionPDF(questions, outputPath);
+    if (!parsed || !Array.isArray(parsed.questions)) {
+      return res.status(500).json({
+        error: 'Invalid or incomplete JSON returned from Gemini.',
+        raw: correctmcqs,
+      });
+    }
+
+    const timestamp = Date.now();
+    const outputPath = path.join(__dirname, './output', `${pdfFile.name}_${timestamp}.pdf`);
+    generateQuestionPDF(parsed.questions, outputPath);
     res.download(outputPath, `${pdfFile.name}_${timestamp}.pdf`);
-    
-    // res.json({
-    //   text: correctmcqs,
-    //   isOCR,
-    //   filename: pdfFile.name,
-    // });
   } catch (error) {
     console.error('Error:', error);
     res.status(500).json({
@@ -212,12 +218,10 @@ app.post('/process-pdf', async (req, res) => {
       details: error.message,
     });
   } finally {
-    // Delete uploaded file
     if (req.files?.pdf?.tempFilePath && fs.existsSync(req.files.pdf.tempFilePath)) {
       fs.unlinkSync(req.files.pdf.tempFilePath);
     }
 
-    // Delete generated images
     const tempDir = path.join(__dirname, 'temp');
     generatedFiles.forEach(file => {
       const filePath = path.join(tempDir, file);
@@ -228,5 +232,5 @@ app.post('/process-pdf', async (req, res) => {
 
 // Start server
 app.listen(3000, () => {
-  console.log('Server running on port 3000');
+  console.log('🚀 Server running on port 3000');
 });
