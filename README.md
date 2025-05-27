@@ -1,14 +1,50 @@
 # PDF MCQ Processor
 
-A robust Node.js backend service that processes PDF files containing multiple-choice questions (MCQs), extracts them using AI, and generates a formatted PDF output with the questions and their correct answers. This service is particularly useful for educators, content creators, and anyone who needs to process and format multiple-choice questions from PDF documents.
+<div align="center">
 
-## 🌟 Features
+![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+![Node.js](https://img.shields.io/badge/node-%3E%3D14.0.0-brightgreen.svg)
+![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
 
+A robust Node.js backend service that processes PDF files containing multiple-choice questions (MCQs), extracts them using AI, and generates a formatted PDF output with the questions and their correct answers.
+
+[Features](#-features) • [Installation](#-installation) • [API Documentation](#-api-documentation) • [Contributing](#-contributing) • [Support](#-support)
+
+</div>
+
+## 📋 Table of Contents
+
+- [Overview](#-overview)
+- [Features](#-features)
+- [Architecture](#-architecture)
+- [Prerequisites](#-prerequisites)
+- [Installation](#-installation)
+- [Configuration](#-configuration)
+- [API Documentation](#-api-documentation)
+- [Development](#-development)
+- [Contributing](#-contributing)
+- [Security](#-security)
+- [License](#-license)
+- [Support](#-support)
+
+## 🌟 Overview
+
+The PDF MCQ Processor is a powerful backend service designed to automate the extraction and formatting of multiple-choice questions from PDF documents. It leverages advanced technologies including:
+
+- PDF text extraction and OCR
+- Google's Gemini AI for intelligent MCQ processing
+- Automated correct answer identification
+- Professional PDF output generation
+
+## ✨ Features
+
+### Core Functionality
 - **PDF Processing**
-  - Text extraction from PDF files
-  - OCR capabilities for scanned documents
-  - Support for various PDF formats and layouts
+  - Text extraction from various PDF formats
+  - OCR support for scanned documents
   - Automatic text cleaning and formatting
+  - Support for multiple PDF layouts
 
 - **AI Integration**
   - Powered by Google's Gemini AI
@@ -22,65 +58,110 @@ A robust Node.js backend service that processes PDF files containing multiple-ch
   - Highlighted correct answers
   - Professional document layout
 
-- **API Features**
-  - RESTful API endpoints
-  - CORS enabled for cross-origin requests
-  - File upload handling with size limits
-  - Health check monitoring
-  - Error handling and validation
+### Technical Features
+- RESTful API endpoints
+- CORS enabled for cross-origin requests
+- File upload handling with size limits
+- Health check monitoring
+- Comprehensive error handling
+- Automatic resource cleanup
 
-## 🚀 Getting Started
+## 🏗 Architecture
 
-### Prerequisites
+The service follows a modular architecture:
 
+```
+pdf-mcq-processor/
+├── index.js           # Main application file
+├── .env              # Environment variables
+├── package.json      # Project dependencies
+├── output/          # Generated PDFs directory
+└── temp/            # Temporary files directory
+```
+
+### Technology Stack
+- **Backend**: Node.js with Express
+- **PDF Processing**: pdf-parse, pdfkit
+- **OCR**: Tesseract.js
+- **AI**: Google Gemini AI
+- **File Handling**: express-fileupload
+- **Image Processing**: sharp
+
+## 📋 Prerequisites
+
+Before you begin, ensure you have the following installed:
 - Node.js (v14 or higher)
-  - Check version: `node --version`
-  - Download from: [Node.js Official Website](https://nodejs.org/)
+  ```bash
+  node --version  # Should be >= 14.0.0
+  ```
 - npm (v6 or higher) or yarn
-  - Check npm version: `npm --version`
-  - Check yarn version: `yarn --version`
+  ```bash
+  npm --version   # Should be >= 6.0.0
+  # or
+  yarn --version  # Should be >= 1.22.0
+  ```
 - Google Gemini API key
   - Get your API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
-- Minimum 2GB RAM recommended
+
+### System Requirements
+- Minimum 2GB RAM
 - 500MB free disk space
+- Stable internet connection for AI processing
 
-### Installation
+## 🚀 Installation
 
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/pdf-mcq-processor.git
-cd pdf-mcq-processor
-```
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/pdf-mcq-processor.git
+   cd pdf-mcq-processor
+   ```
 
-2. Install dependencies:
-```bash
-# Using npm
-npm install
+2. **Install dependencies**
+   ```bash
+   # Using npm
+   npm install
 
-# Using yarn
-yarn install
-```
+   # Using yarn
+   yarn install
+   ```
 
-3. Create a `.env` file in the root directory:
-```env
-# Required
-GEMINI_API_KEY=your_gemini_api_key_here
+3. **Create environment file**
+   ```bash
+   cp .env.example .env
+   ```
 
-# Optional (defaults shown)
-PORT=3000
-MAX_FILE_SIZE=10485760  # 10MB in bytes
-TEMP_DIR=/tmp
-OUTPUT_DIR=./output
-```
+4. **Configure environment variables**
+   ```env
+   # Required
+   GEMINI_API_KEY=your_gemini_api_key_here
 
-4. Create required directories:
-```bash
-mkdir -p output temp
-```
+   # Optional (defaults shown)
+   PORT=3000
+   MAX_FILE_SIZE=10485760  # 10MB in bytes
+   TEMP_DIR=/tmp
+   OUTPUT_DIR=./output
+   ```
+
+5. **Create required directories**
+   ```bash
+   mkdir -p output temp
+   ```
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| GEMINI_API_KEY | Google Gemini API key | - | Yes |
+| PORT | Server port | 3000 | No |
+| MAX_FILE_SIZE | Maximum file size in bytes | 10485760 | No |
+| TEMP_DIR | Temporary files directory | /tmp | No |
+| OUTPUT_DIR | Output PDF directory | ./output | No |
 
 ### Running the Application
 
-Development mode with hot reload:
+**Development mode with hot reload:**
 ```bash
 # Using npm
 npm run dev
@@ -89,7 +170,7 @@ npm run dev
 yarn dev
 ```
 
-Production mode:
+**Production mode:**
 ```bash
 # Using npm
 npm start
@@ -111,7 +192,7 @@ The server will start on port 3000 (or the port specified in your .env file).
 - **Body**: 
   - `pdf`: PDF file containing MCQs (max 10MB)
 
-**Request Example**:
+**Request Example:**
 ```bash
 curl -X POST \
   -H "Content-Type: multipart/form-data" \
@@ -119,7 +200,7 @@ curl -X POST \
   http://localhost:3000/process-pdf
 ```
 
-**Success Response**:
+**Success Response:**
 - Content-Type: `application/pdf`
 - Headers:
   ```
@@ -128,7 +209,7 @@ curl -X POST \
   ```
 - Body: PDF file with processed MCQs
 
-**Error Response**:
+**Error Response:**
 ```json
 {
   "error": "Error message",
@@ -136,61 +217,39 @@ curl -X POST \
 }
 ```
 
-Common Error Codes:
-- `400`: Bad Request (invalid file, missing file)
-- `413`: Payload Too Large (file too big)
-- `415`: Unsupported Media Type (non-PDF file)
-- `500`: Internal Server Error
-
 #### 2. Health Check
 - **URL**: `/health`
 - **Method**: `GET`
-
-**Response**:
-```json
-{
-  "status": "OK",
-  "timestamp": "2024-03-14T12:00:00.000Z",
-  "version": "1.0.0",
-  "uptime": "2h 30m"
-}
-```
+- **Response**: 
+  ```json
+  {
+    "status": "OK",
+    "timestamp": "2024-03-14T12:00:00.000Z",
+    "version": "1.0.0",
+    "uptime": "2h 30m"
+  }
+  ```
 
 #### 3. Root Endpoint
 - **URL**: `/`
 - **Method**: `GET`
-
-**Response**:
-```json
-{
-  "message": "PDF MCQ Processor API",
-  "status": "Running",
-  "version": "1.0.0",
-  "endpoints": {
-    "POST /process-pdf": "Process PDF and extract MCQs",
-    "GET /health": "Health check",
-    "GET /": "API information"
+- **Response**: 
+  ```json
+  {
+    "message": "PDF MCQ Processor API",
+    "status": "Running",
+    "version": "1.0.0",
+    "endpoints": {
+      "POST /process-pdf": "Process PDF and extract MCQs",
+      "GET /health": "Health check",
+      "GET /": "API information"
+    }
   }
-}
-```
+  ```
 
-## 🛠️ Technical Details
-
-### Dependencies
-
-- `express` (^4.18.2): Web framework
-- `cors` (^2.8.5): Cross-origin resource sharing
-- `express-fileupload` (^1.4.0): File upload handling
-- `pdf-parse` (^1.1.1): PDF text extraction
-- `tesseract.js` (^5.0.0): OCR capabilities
-- `@google/generative-ai` (^0.1.0): Google's Gemini AI integration
-- `pdfkit` (^0.14.0): PDF generation
-- `json5` (^2.2.3): JSON parsing
-- `sharp` (^0.33.0): Image processing
-- `dotenv` (^16.3.1): Environment variable management
+## 💻 Development
 
 ### Project Structure
-
 ```
 pdf-mcq-processor/
 ├── index.js           # Main application file
@@ -202,49 +261,17 @@ pdf-mcq-processor/
 └── README.md        # Project documentation
 ```
 
-### Environment Variables
+### Development Workflow
+1. Create a new branch for your feature
+2. Make your changes
+3. Run tests
+4. Submit a pull request
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| GEMINI_API_KEY | Google Gemini API key | - | Yes |
-| PORT | Server port | 3000 | No |
-| MAX_FILE_SIZE | Maximum file size in bytes | 10485760 | No |
-| TEMP_DIR | Temporary files directory | /tmp | No |
-| OUTPUT_DIR | Output PDF directory | ./output | No |
-
-## 🔍 Troubleshooting
-
-### Common Issues
-
-1. **File Upload Fails**
-   - Check file size (max 10MB)
-   - Ensure file is PDF format
-   - Verify file permissions
-
-2. **OCR Not Working**
-   - Ensure Tesseract.js is properly installed
-   - Check image quality in PDF
-   - Verify system memory availability
-
-3. **API Key Issues**
-   - Verify GEMINI_API_KEY in .env
-   - Check API key validity
-   - Ensure proper API key format
-
-4. **Memory Issues**
-   - Increase Node.js memory limit:
-     ```bash
-     export NODE_OPTIONS="--max-old-space-size=4096"
-     ```
-   - Monitor system memory usage
-   - Clean up temporary files
-
-### Logging
-
-Enable debug logging by setting:
-```bash
-export DEBUG=pdf-mcq-processor:*
-```
+### Code Style
+- Follow ESLint configuration
+- Use meaningful variable names
+- Add JSDoc comments for functions
+- Keep functions small and focused
 
 ## 🤝 Contributing
 
@@ -258,7 +285,6 @@ We welcome contributions! Please follow these steps:
 6. Open a Pull Request
 
 ### Development Guidelines
-
 - Follow the existing code style
 - Add comments for complex logic
 - Write meaningful commit messages
@@ -267,20 +293,14 @@ We welcome contributions! Please follow these steps:
 - Follow semantic versioning
 - Update CHANGELOG.md for significant changes
 
-### Code Style
-
-- Use ESLint for code linting
-- Follow Airbnb JavaScript Style Guide
-- Use meaningful variable names
-- Add JSDoc comments for functions
-- Keep functions small and focused
-
-## 📝 Code of Conduct
-
-Please read our [Code of Conduct](CODE_OF_CONDUCT.md) to keep our community approachable and respectable.
+### Pull Request Process
+1. Update the README.md with details of changes
+2. Update the documentation if needed
+3. The PR will be merged once you have the sign-off of at least one maintainer
 
 ## 🔒 Security
 
+### Best Practices
 - Never commit API keys or sensitive information
 - Use environment variables for configuration
 - Keep dependencies updated
@@ -290,31 +310,30 @@ Please read our [Code of Conduct](CODE_OF_CONDUCT.md) to keep our community appr
 - Input validation and sanitization
 - Rate limiting implementation
 
+### Reporting Vulnerabilities
+Please report security vulnerabilities to security@yourdomain.com
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
-
-- Google Gemini AI for MCQ processing
-- All contributors who have helped shape this project
-- Open source community for various dependencies
-- PDF processing community for insights and tools
-
 ## 📞 Support
 
-For support, please:
+### Getting Help
 1. Check the [FAQ](FAQ.md)
 2. Search existing [issues](https://github.com/yourusername/pdf-mcq-processor/issues)
 3. Open a new issue if needed
 4. Contact maintainers for urgent matters
 
 ### Community
-
 - [Discord Server](https://discord.gg/your-server)
 - [Stack Overflow](https://stackoverflow.com/questions/tagged/pdf-mcq-processor)
 - [Twitter](https://twitter.com/your-handle)
 
 ---
 
-Made with ❤️ by the PDF MCQ Processor team 
+<div align="center">
+Made with ❤️ by the PDF MCQ Processor team
+
+[Report Bug](https://github.com/yourusername/pdf-mcq-processor/issues) • [Request Feature](https://github.com/yourusername/pdf-mcq-processor/issues)
+</div> 
